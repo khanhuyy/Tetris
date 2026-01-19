@@ -25,6 +25,13 @@ public class Block : MonoBehaviour
     private const int TopLimit = 23;
     private const float FallTime = 1f;
     private float _deltaFallTime;
+    private Vector2  _startTouchPos;
+    private bool _isSwiping;
+    private bool _isHolding;
+    private double _swipeThreshold = 0.01;
+    private double _holdThreshold = 1;
+    private double _holdTime = 0.1;
+
 
     private static readonly Transform[] Board = new Transform[(RightLimit - LeftLimit) * (TopLimit - BottomLimit)]; // use 1 dimension array to optimize speed
     private static GameObject _heldBlock;
@@ -49,6 +56,7 @@ public class Block : MonoBehaviour
         if (GameManager.Instance.currentState == GameState.Move)
         {
             Move();
+            HandleTouch();
             HoldAndFall();
             // Hold();
         }
@@ -82,22 +90,93 @@ public class Block : MonoBehaviour
         }  
     }
 
+    void HandleTouch()
+    {
+        if (Input.touchCount == 0) return;
+
+        Touch touch = Input.GetTouch(0);
+
+        if (touch.phase == TouchPhase.Began)
+        {
+            _startTouchPos = touch.position;
+            _isSwiping = true;
+            _isHolding = true;
+        }
+        else if (touch.phase == TouchPhase.Ended)
+        {
+            if (_isSwiping)
+            {
+                Vector2 endPos = touch.position;
+                Vector2 delta = endPos - _startTouchPos;
+
+                if (delta.magnitude < _swipeThreshold) return;
+
+                if (Mathf.Abs(delta.x) > Mathf.Abs(delta.y))
+                {
+                    // Vuốt trái / phải
+                    if (delta.x < 0)
+                    {
+                        transform.position += Vector3.left;
+                        if(!ValidMovement()) transform.position += Vector3.right;
+                    }
+                    else
+                    {
+                        transform.position += Vector3.right;
+                        if(!ValidMovement()) transform.position += Vector3.left;
+                    }
+                }
+                else
+                {
+                    // Vuốt lên / xuống
+                    if (delta.y > 0)
+                    {
+                        transform.RotateAround(rotationPoint.position, new Vector3(0, 0, 1), -90);
+                        if(!ValidMovement()) 
+                            transform.RotateAround(rotationPoint.position, new Vector3(0, 0, 1), 90);
+                    }
+                    else
+                    {
+                        StartCoroutine(SmashCoroutine());
+                        AddToBoard();
+                        if(IsFullCols())
+                        {
+                            enabled = false;
+                            GameManager.Instance.GameOver();
+                            return;
+                        }
+                        enabled = false;
+                        _spawner.Spawn();
+                        _holdInTurn = false; // refactor
+                        GameManager.Instance.currentState = GameState.Move;
+                    }
+                }
+
+                _isSwiping = false;
+            }
+        }
+        else
+        {
+            Debug.Log("hello");
+            if (_isHolding)
+            {
+                _holdTime += Time.deltaTime;
+                if (_holdTime >= _holdThreshold)
+                {
+                    if(!_holdInTurn)
+                    {
+                        StartCoroutine(HoldCoroutine());
+                    }
+                }
+            }
+        }
+    }
+
+
     private void HoldAndFall()
     {
         if(Input.GetKeyDown(KeyCode.Space))
         {
-            StartCoroutine(SmashCoroutine());
-            AddToBoard();
-            if(IsFullCols())
-            {
-                enabled = false;
-                GameManager.Instance.GameOver();
-                return;
-            }
-            enabled = false;
-            _spawner.Spawn();
-            _holdInTurn = false; // refactor
-            GameManager.Instance.currentState = GameState.Move;
+            SolveHold();
         } else if(Input.GetKeyDown(KeyCode.C)) {
             if(!_holdInTurn)
             {
@@ -134,6 +213,22 @@ public class Block : MonoBehaviour
         
     }
 
+    public void SolveHold()
+    {
+        StartCoroutine(SmashCoroutine());
+        AddToBoard();
+        if(IsFullCols())
+        {
+            enabled = false;
+            GameManager.Instance.GameOver();
+            return;
+        }
+        enabled = false;
+        _spawner.Spawn();
+        _holdInTurn = false; // refactor
+        GameManager.Instance.currentState = GameState.Move;
+    }
+    
     private IEnumerator SmashCoroutine()
     {
         GameManager.Instance.currentState = GameState.Wait;
